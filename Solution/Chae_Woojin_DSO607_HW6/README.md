@@ -12,8 +12,8 @@ Verified on your laptop: **Apple Silicon (arm64), macOS 26.6.2, zsh**. macOS alr
 | Notebook | `Chae_Woojin_DSO607_HW6.ipynb` |
 | NCSA username | `wchae` |
 | Delta login | `login.delta.ncsa.illinois.edu` |
-| GPU charge account | `YOUR_PROJECT-gpu` (find with `accounts` on Delta) |
-| Delta storage project | `LOCAL_PROJECT` (verify the actual `/work/hdd` directory) |
+| GPU charge account | `bgxw-delta-gpu` (reported by your `accounts` output) |
+| Delta storage project | `bgxw` (`/work/hdd/bgxw` appears in your directory listing; verify write access when creating the folder) |
 
 Every Mac path containing `26 Fall` is quoted. Copy the commands without terminal prompt symbols. **Mac Terminal** means a local shell; **Delta Terminal** means the shell after SSH login. `module`, `accounts`, `sbatch`, and `squeue` belong in Delta Terminal. If unsure where you are, run `hostname`: your Mac and the Delta login node have different names. Use a second Terminal tab (Command-T) for local transfers while keeping the Delta session open.
 
@@ -57,23 +57,23 @@ accounts
 module spider pytorch-conda
 ```
 
-From `accounts`, note (a) the GPU charge account under Project, usually ending in `-gpu`, and (b) the local project/storage directory. These can have DIFFERENT names. You need an active GPU allocation, not only an SSH login. Below replace `LOCAL_PROJECT` with the actual storage project, and `YOUR_PROJECT-gpu` with the actual GPU charge account. Check the paths rather than assuming an ACCESS project ID is a directory name.
+Your `accounts` output identifies the GPU charge account as `bgxw-delta-gpu`, with 858 hours remaining when you copied it. The matching project code `bgxw` appears in `/work/hdd`; use `/work/hdd/bgxw/wchae` for this experiment. The balance can change as jobs run. The commands below already contain your account and path. Creating the directory below checks your write access; if it reports `Permission denied`, ask your project administrator to verify storage permissions.
 
 ```bash
 ls /work/hdd
-mkdir -p /work/hdd/LOCAL_PROJECT/$USER/Chae_Woojin_DSO607_HW6
+mkdir -p /work/hdd/bgxw/$USER/Chae_Woojin_DSO607_HW6
 ```
 
 ## 2. Transfer the files (a second Mac Terminal tab)
 
-First create the remote directory using Step 1. Then run this **on your Mac**, replacing `LOCAL_PROJECT` in the destination with the storage project you found on Delta:
+First create the remote directory using Step 1. Then run this **on your Mac**; the destination is already filled in:
 
 ```bash
 cd "/Users/wchae/Courseworks/26 Fall/DSO607/Solution/Chae_Woojin_DSO607_HW6"
 scp -o PreferredAuthentications=keyboard-interactive,password \
   README.md experiment.py config.json check_environment.py run_delta.slurm \
   requirements-extra.txt Chae_Woojin_DSO607_HW6.ipynb \
-  wchae@login.delta.ncsa.illinois.edu:/work/hdd/LOCAL_PROJECT/wchae/Chae_Woojin_DSO607_HW6/
+  wchae@login.delta.ncsa.illinois.edu:/work/hdd/bgxw/wchae/Chae_Woojin_DSO607_HW6/
 ```
 
 This transfers the seven project files without uploading local environments or downloaded results. Complete NCSA password/Duo authentication again if prompted. If `No such file or directory` refers to a source file, confirm `pwd` shows your local homework folder. If it refers to the destination, create or correct the remote directory in Step 1.
@@ -81,7 +81,7 @@ This transfers the seven project files without uploading local environments or d
 ## 3. Check the software (return to your Delta Terminal tab)
 
 ```bash
-cd /work/hdd/LOCAL_PROJECT/$USER/Chae_Woojin_DSO607_HW6
+cd /work/hdd/bgxw/$USER/Chae_Woojin_DSO607_HW6
 module reset
 module load pytorch-conda/2.8
 export PYTHONNOUSERSITE=1
@@ -114,7 +114,7 @@ c.update(R=2, EPOCHS=2)
 Path('smoke_config.json').write_text(json.dumps(c, indent=2))
 PY
 python3 experiment.py prepare --synthetic --config smoke_config.json --run runs/smoke
-sbatch --account=YOUR_PROJECT-gpu --time=00:15:00 run_delta.slurm runs/smoke
+sbatch --account=bgxw-delta-gpu --time=00:15:00 run_delta.slurm runs/smoke
 ```
 
 Slurm prints a job ID. Save it. Files under `logs/` appear when the job starts. Check progress:
@@ -151,7 +151,7 @@ c['R'] = 2
 Path('pilot_config.json').write_text(json.dumps(c, indent=2))
 PY
 python3 experiment.py prepare --config pilot_config.json --data data --run runs/pilot
-sbatch --account=YOUR_PROJECT-gpu --time=02:00:00 run_delta.slurm runs/pilot
+sbatch --account=bgxw-delta-gpu --time=02:00:00 run_delta.slurm runs/pilot
 ```
 
 This keeps the full data and the production EPOCHS. Do NOT finalize the pilot or inspect test outcomes. Inspect validation errors, convergence warnings, stopped epochs, and timing only. Fit time may be dominated by CPU Lasso/KNN/RF even while you hold one GPU. A small CNN is a practical choice for 200 candidate fits; there is no promised runtime or accuracy. Estimate full wall time from the two `total_seconds` fields in `runs/pilot/repetitions/*/complete.json`: roughly 100 times their mean, plus margin. Early stopping makes this approximate. Adjust the sbatch wall time within the partition limit (currently 48h). If needed, resume completed repetitions in a subsequent job.
@@ -164,7 +164,7 @@ Before the final run, make any development-informed choices to EPOCHS or candida
 
 ```bash
 python3 experiment.py prepare --config config.json --data data --run runs/full
-sbatch --account=YOUR_PROJECT-gpu run_delta.slurm runs/full
+sbatch --account=bgxw-delta-gpu run_delta.slurm runs/full
 ```
 
 `config.json` defaults to R=100 and EPOCHS=20. The batch script defaults to 12h; use `sbatch --time=24:00:00 ...` if pilot timing warrants it. Keep the dataset, source code, software versions, and run config unchanged during the experiment. Only run ONE training process per run directory.
@@ -200,25 +200,25 @@ Every error is a proportion, not a percentage. The summary includes a fifth majo
 
 ## 8. Retrieve results and complete the notebook
 
-Run the following in **Mac Terminal** after finalization. Replace `LOCAL_PROJECT` in each remote path. Each download gets a timestamped folder under your homework project, preserving previous downloads:
+Run the following in **Mac Terminal** after finalization. The remote paths are already filled in. Each download gets a timestamped folder under your homework project, preserving previous downloads:
 
 ```bash
 cd "/Users/wchae/Courseworks/26 Fall/DSO607/Solution/Chae_Woojin_DSO607_HW6"
 DOWNLOAD_DIR="$PWD/delta_download/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$DOWNLOAD_DIR/runs"
 scp -o PreferredAuthentications=keyboard-interactive,password -r \
-  wchae@login.delta.ncsa.illinois.edu:/work/hdd/LOCAL_PROJECT/wchae/Chae_Woojin_DSO607_HW6/runs/full \
+  wchae@login.delta.ncsa.illinois.edu:/work/hdd/bgxw/wchae/Chae_Woojin_DSO607_HW6/runs/full \
   "$DOWNLOAD_DIR/runs/"
 scp -o PreferredAuthentications=keyboard-interactive,password -r \
-  wchae@login.delta.ncsa.illinois.edu:/work/hdd/LOCAL_PROJECT/wchae/Chae_Woojin_DSO607_HW6/logs \
+  wchae@login.delta.ncsa.illinois.edu:/work/hdd/bgxw/wchae/Chae_Woojin_DSO607_HW6/logs \
   "$DOWNLOAD_DIR/"
 scp -o PreferredAuthentications=keyboard-interactive,password \
-  'wchae@login.delta.ncsa.illinois.edu:/work/hdd/LOCAL_PROJECT/wchae/Chae_Woojin_DSO607_HW6/*.py' \
-  'wchae@login.delta.ncsa.illinois.edu:/work/hdd/LOCAL_PROJECT/wchae/Chae_Woojin_DSO607_HW6/*.json' \
-  'wchae@login.delta.ncsa.illinois.edu:/work/hdd/LOCAL_PROJECT/wchae/Chae_Woojin_DSO607_HW6/*.ipynb' \
-  'wchae@login.delta.ncsa.illinois.edu:/work/hdd/LOCAL_PROJECT/wchae/Chae_Woojin_DSO607_HW6/README.md' \
-  'wchae@login.delta.ncsa.illinois.edu:/work/hdd/LOCAL_PROJECT/wchae/Chae_Woojin_DSO607_HW6/requirements-extra.txt' \
-  'wchae@login.delta.ncsa.illinois.edu:/work/hdd/LOCAL_PROJECT/wchae/Chae_Woojin_DSO607_HW6/run_delta.slurm' \
+  'wchae@login.delta.ncsa.illinois.edu:/work/hdd/bgxw/wchae/Chae_Woojin_DSO607_HW6/*.py' \
+  'wchae@login.delta.ncsa.illinois.edu:/work/hdd/bgxw/wchae/Chae_Woojin_DSO607_HW6/*.json' \
+  'wchae@login.delta.ncsa.illinois.edu:/work/hdd/bgxw/wchae/Chae_Woojin_DSO607_HW6/*.ipynb' \
+  'wchae@login.delta.ncsa.illinois.edu:/work/hdd/bgxw/wchae/Chae_Woojin_DSO607_HW6/README.md' \
+  'wchae@login.delta.ncsa.illinois.edu:/work/hdd/bgxw/wchae/Chae_Woojin_DSO607_HW6/requirements-extra.txt' \
+  'wchae@login.delta.ncsa.illinois.edu:/work/hdd/bgxw/wchae/Chae_Woojin_DSO607_HW6/run_delta.slurm' \
   "$DOWNLOAD_DIR/"
 open "$DOWNLOAD_DIR"
 ```

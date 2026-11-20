@@ -23,6 +23,52 @@ Your Mac edits files and opens saved results. Delta's **login node** accepts SSH
 
 These instructions target **NCSA Delta**, not DeltaAI (a separate system with different partitions). If your allocation is for DeltaAI, adapt the scheduler setup before using this script.
 
+## How the pieces work together
+
+```text
+Your Mac --SSH--> Delta login node --sbatch--> Slurm queue
+   |                                               |
+   | scp                                           | starts when resources are free
+   v                                               v
+Shared Delta project files <---read/write--- GPU compute node
+   |
+   +--scp back to your Mac--> tables, plots, models, notebook
+```
+
+SSH gives you a remote shell; it does not reserve a GPU. `scp` copies files between computers; editing a Mac file does not automatically update its Delta copy. Slurm allocates compute resources. `sbatch` submits a script and returns a job ID immediately; the script starts later on a compute node. Inside the script, `srun` launches the Python processes in that allocation. This distinction is documented in [Delta's job guide](https://docs.ncsa.illinois.edu/systems/delta/en/latest/user_guide/running_jobs.html).
+
+The login and compute nodes can both access your shared `/work/hdd/bgxw/wchae/Chae_Woojin_DSO607_HW6` directory. No extra copy to the GPU node is needed: the batch script reads the prepared arrays there and writes results there. Your Mac has a separate filesystem; use `scp` to retrieve those results. `cd` changes a terminal's working directory; it never copies files.
+
+| Phase | Where it runs | What it accomplishes |
+| --- | --- | --- |
+| 1. Login and directory setup | Mac -> Delta login node | Establish access and a writable project directory |
+| 2. Upload | Mac Terminal | Place your source files in Delta's shared project directory |
+| 3. Environment check | Delta login node | Confirm the Python imports before requesting a GPU |
+| 4. Synthetic smoke job | Prepare on login; train on compute node | Test the scheduler, GPU, and entire code path cheaply |
+| 5. CIFAR pilot | Prepare on login; train on compute node | Check real-data fitting and estimate production runtime |
+| 6. Full experiment | Prepare on login; train on compute node | Complete all 100 repetitions with frozen settings |
+| 7. Final evaluation | Delta login node | Score saved test predictions after training is complete |
+| 8. Download and reporting | Mac | Inspect outputs and complete your submission |
+
+### What your job script requests
+
+`run_delta.slurm` asks for one node, one task/process, eight CPU cores, one NVIDIA GPU, 24 GB of host RAM, and up to 12 hours. `gpuA100x4` names a partition whose nodes contain four A100 GPUs; `--gpus-per-node=1` requests only one of them. `--mem=24G` refers to CPU/system RAM, not the GPU's own memory. The wall-time request is an upper bound: Slurm stops a job that exceeds it. The smoke/pilot commands override that bound with shorter limits.
+
+The script loads its own modules because a batch job needs a reproducible environment. The two `srun` commands first check GPU computation and then train. The methods run sequentially in one process: Lasso, KNN, and RF use CPUs; the CNN uses the GPU. GPU utilization may be low while classical methods run. This code does not distribute repetitions across GPUs.
+
+`sbatch` acceptance means **queued**, not finished. `squeue` distinguishes pending/running jobs; `sacct` shows the final state and exit code. The job's standard output goes to `logs/hw6-cifar-JOBID.out`, and warnings/errors normally go to `.err`. A warning in `.err` alone does not establish failure; inspect the final job state and the expected completion messages. Create `logs/` before submission because Slurm opens these files before your script executes.
+
+### What is saved and why
+
+- `data/`: downloaded CIFAR source files on Delta, reused across runs.
+- `runs/smoke`, `runs/pilot`, `runs/full`: separate prepared inputs, frozen settings, split indices, candidate logs, selected models, and saved test probabilities. Keeping these runs separate prevents synthetic and pilot outputs from being confused with the final experiment.
+- `logs/`: scheduler job output, including setup/GPU diagnostics and exceptions.
+- `delta_download/TIMESTAMP/` on your Mac: a snapshot of the retrieved final run and its code, for local inspection.
+
+`prepare` creates and freezes the data and split indices. `train` fits models and saves test probabilities without computing test scores. `finalize` uses the saved probabilities to produce test errors and figures only after all 100 real-data repetitions finish. This separates model selection from final test evaluation, as required by HW6.
+
+Copy command blocks as multiple lines. A trailing backslash means 'continue this same command on the next line'; add one only where shown. For example, `module reset` and `module load pytorch-conda/2.8` are separate commands with no trailing backslashes.
+
 ## Experiment choices and homework mapping
 
 - Observation: one labeled CIFAR-10 image. Use only the original 50,000-image training pool; select cats (class 3 -> 0) and dogs (class 5 -> 1). Exclude all other classes and the original CIFAR test batch. Before duplicate removal this gives 10,000 images, 5,000 per class. This is a new binary experiment, not a standard CIFAR benchmark score.
@@ -40,6 +86,10 @@ These instructions target **NCSA Delta**, not DeltaAI (a separate system with di
 - The training-majority baseline predicts 1 when training prevalence >=0.5. Repeated errors are averaged, not predictions. `summary.csv` includes across-repetition sample SD (`ddof=1`). `paired_differences.csv` is method error minus Lasso error in the same repetition; negative favors that method.
 
 ## 1. Log in and identify your allocation (Mac Terminal)
+
+**Purpose:** Establish an authenticated remote shell and identify where your allocation permits you to store files. SSH gets you onto a login node; it does not allocate a GPU. The directory creation gives the later upload a destination.
+
+**Success check:** You have a Delta shell prompt, `accounts` lists `bgxw-delta-gpu`, and `mkdir` succeeds. This setup does not train a model.
 
 You have resolved the login issue. Use your working NCSA credentials:
 
@@ -66,6 +116,10 @@ mkdir -p /work/hdd/bgxw/$USER/Chae_Woojin_DSO607_HW6
 
 ## 2. Transfer the files (a second Mac Terminal tab)
 
+**Purpose:** Copy the seven source/configuration files from your Mac to the shared Delta project directory. Your Mac and Delta hold separate copies; transfer again when you intentionally change a source file before a new run.
+
+**Success check:** The transfer completes without errors. In Delta Terminal, `ls /work/hdd/bgxw/wchae/Chae_Woojin_DSO607_HW6` shows the notebook, script, configuration, requirements, README, environment checker, and Slurm script.
+
 First create the remote directory using Step 1. Then run this **on your Mac**; the destination is already filled in:
 
 ```bash
@@ -76,9 +130,20 @@ scp -o PreferredAuthentications=keyboard-interactive,password \
   wchae@login.delta.ncsa.illinois.edu:/work/hdd/bgxw/wchae/Chae_Woojin_DSO607_HW6/
 ```
 
-This transfers the seven project files without uploading local environments or downloaded results. Complete NCSA password/Duo authentication again if prompted. If `No such file or directory` refers to a source file, confirm `pwd` shows your local homework folder. If it refers to the destination, create or correct the remote directory in Step 1.
+This transfers the seven project files without uploading local environments or downloaded results. To synchronize only this updated README later, run the following in Mac Terminal from the local project directory:
+
+```bash
+scp -o PreferredAuthentications=keyboard-interactive,password README.md \
+  wchae@login.delta.ncsa.illinois.edu:/work/hdd/bgxw/wchae/Chae_Woojin_DSO607_HW6/README.md
+```
+
+ Complete NCSA password/Duo authentication again if prompted. If `No such file or directory` refers to a source file, confirm `pwd` shows your local homework folder. If it refers to the destination, create or correct the remote directory in Step 1.
 
 ## 3. Check the software (return to your Delta Terminal tab)
+
+**Purpose:** Select Delta's installed Python/PyTorch stack and check that all required packages import. This isolates software problems from scheduling/GPU problems and avoids spending GPU allocation time on missing imports.
+
+**Success check:** The checker prints versions for torch, torchvision, NumPy, SciPy, scikit-learn, pandas, Matplotlib, and joblib with no Python traceback. This confirms imports, not GPU execution.
 
 ```bash
 cd /work/hdd/bgxw/$USER/Chae_Woojin_DSO607_HW6
@@ -91,6 +156,14 @@ mkdir -p logs runs data
 
 The documented module version is 2.8; confirm with `module spider` on your account. If the available version differs, update the module line in `run_delta.slurm` AND your setup commands before preparing the real run. An import check does not require a GPU; CUDA need not be available on the login node. Do not train on the shared login node.
 
+### Your Step 3 output: what it means
+
+Your reported imports succeeded with `torch 2.8.0+cu128`, `torchvision 0.23.0+cu128`, NumPy 2.2.6, SciPy 1.16.1, scikit-learn 1.7.2, pandas 2.3.2, Matplotlib 3.10.6, and joblib 1.5.2. The `+cu128` suffix identifies a CUDA 12.8 build; it does not itself prove that a GPU is accessible in the current shell. The checker in Step 3 imports libraries only. The Step 4 batch job runs the separate `--gpu` check and a real CUDA matrix calculation on an allocated GPU.
+
+The `cray-mpich requires a network targeting module` warning occurred while the site's default Cray programming environment was being reset. Cray MPICH supplies MPI, used for communication among distributed processes; see [Delta's programming environment guide](https://docs.ncsa.illinois.edu/systems/delta/en/latest/user_guide/prog_env.html). Our Python code does not initialize MPI or distributed PyTorch. Given that all imports then succeeded, this warning does not invalidate Step 3. Proceed to the smoke job rather than changing the working module stack just to remove a warning. If the batch job aborts during module loading, or its GPU check fails, inspect the actual batch `.err` and `.out` files before proceeding to real data.
+
+The module banner's `conda activate base` suggestion is optional for this session: your imports already used the desired PyTorch stack. You do not need to create the overlay `.venv` described below unless an import is missing. Loading a module adjusts environment variables and search paths for that terminal; it does not install packages on your Mac. `module reset` restores site defaults; `module load pytorch-conda/2.8` selects the site PyTorch environment. `PYTHONNOUSERSITE=1` prevents unrelated user-installed Python packages from shadowing it. `mkdir -p logs runs data` creates the directories used by later steps, and is safe to repeat.
+
 If imports fail because supplementary packages are absent, make an overlay environment once, without changing the shared module:
 
 ```bash
@@ -102,6 +175,10 @@ python3 -m venv --system-site-packages .venv
 If you created this overlay, run `source .venv/bin/activate` before subsequent manual Python commands in this Delta session; then `python3` uses the overlay. The batch script detects `.venv/bin/python` automatically. In a new login session, return to the remote project, load the same PyTorch module, and activate the overlay again. Do not copy a Mac virtual environment to Delta; Linux requires different binaries. No CUDA toolkit installation is needed with the site PyTorch module. Record actual loaded versions; the requirements file supplements the site stack rather than fully locking it.
 
 ## 4. Run a short GPU integration test (Delta Terminal)
+
+**Purpose:** Exercise Slurm submission, CUDA computation, all four classifiers, and result saving using small synthetic data. Two repetitions and two CNN epochs keep this a setup test rather than a scientific experiment.
+
+**Success check:** The batch job ends COMPLETED with exit code 0, prints the GPU matrix-test success and all-repetitions completion messages, and creates complete repetition folders. Do not interpret synthetic validation errors as CIFAR performance.
 
 Create a tiny config with R=2 and EPOCHS=2, and synthetic images (no homework scores):
 
@@ -140,6 +217,10 @@ Success includes the GPU matrix test, all four methods for both repetitions, `Al
 
 ## 5. Prepare CIFAR and pilot runtime using development data only (Delta Terminal)
 
+**Purpose:** Run two repetitions on the actual CIFAR data with the intended epoch budget. Use validation diagnostics and elapsed times to identify convergence problems and choose a realistic wall-time request before committing to the full run.
+
+**Success check:** Both pilot repetitions finish, fitting diagnostics are acceptable, and you have a wall-time estimate. Leave test scores uncomputed; development-only decisions can still be made before the final configuration is frozen.
+
 Download and split without holding an idle GPU:
 
 ```bash
@@ -162,6 +243,10 @@ Before the final run, make any development-informed choices to EPOCHS or candida
 
 ## 6. Run the real experiment (Delta Terminal)
 
+**Purpose:** Run the homework's 100 shared development splits with the frozen candidate grids and epoch budget. The job retains selected training-fitted models and their fixed-test probabilities; it does not score the test outcomes.
+
+**Success check:** All 100 repetition folders contain complete.json and the final message says all repetitions finished. A submitted job ID alone is not completion. Test scores are still uncomputed.
+
 ```bash
 python3 experiment.py prepare --config config.json --data data --run runs/full
 sbatch --account=bgxw-delta-gpu run_delta.slurm runs/full
@@ -172,6 +257,10 @@ sbatch --account=bgxw-delta-gpu run_delta.slurm runs/full
 If a wall-time limit interrupts a job, wait until it has ended, then submit the SAME command. Fully finished repetitions are skipped; an interrupted repetition is rerun from the start with the same seed. A partial repetition never counts as complete. Exceptions append to `failures.log` and terminate the job; no failed repetitions are silently omitted. Preserve that log and explain any resolutions. A new scientific configuration requires a new run, not deletion of inconvenient results.
 
 ## 7. Finalize once, then open results (Delta Terminal)
+
+**Purpose:** Evaluate the selected models' saved test predictions after every repetition is finished. This produces the requested error summaries, paired comparisons, baseline, and figures without further model fitting.
+
+**Success check:** FINALIZED.json, the 400-row repetition_results.csv, summary tables, and two plots exist. Do not use these test results to revise the experiment and claim a fresh evaluation on the same test set.
 
 Only after all 100 repetitions have finished and settings are irrevocably settled:
 
@@ -200,6 +289,10 @@ Every error is a proportion, not a percentage. The summary includes a fifth majo
 
 ## 8. Retrieve results and complete the notebook
 
+**Purpose:** Bring the frozen experiment artifacts back to your Mac, display results in the notebook, and write the interpretation and LaTeX report. Downloading is a copy operation; it does not rerun training.
+
+**Success check:** A timestamped local download contains runs/full, logs, matching code, and the notebook. The notebook displays saved results with RUN_EXPERIMENT=False and FINALIZE=False, ready for your interpretations.
+
 Run the following in **Mac Terminal** after finalization. The remote paths are already filled in. Each download gets a timestamped folder under your homework project, preserving previous downloads:
 
 ```bash
@@ -226,6 +319,8 @@ open "$DOWNLOAD_DIR"
 The quotes around remote wildcards prevent your Mac's zsh from expanding them locally. The transferred `experiment.py` must match the embedded notebook implementation and frozen source hash. This downloads results/models and logs without copying Delta's Linux virtual environment or the CIFAR download cache. Keep this Mac Terminal tab open if you want to reuse `$DOWNLOAD_DIR` in the next commands; shell variables belong to their current tab.
 
 ### Open the notebook locally on your Apple Silicon Mac (optional)
+
+**Purpose:** Install a local notebook viewer/kernel and the imported scientific libraries so you can render saved tables and plots. This optional environment is separate from the Delta GPU environment. No local CUDA installation is required.
 
 You can inspect CSVs and PNGs immediately in Finder. To run the notebook's display-only mode, create a separate local environment using your existing course Python:
 
@@ -262,6 +357,7 @@ Mac reminders: Control-C interrupts a foreground command; Command-T opens anothe
 | `zsh: command not found: sbatch` or `module` | You are probably in Mac Terminal; SSH into Delta first |
 | `zsh: no matches found` during scp | Quote the remote path containing `*`, as in Step 8 |
 | Invalid account/account-partition combination | Use `accounts` and select the correct GPU charge account; account access may need PI/admin help |
+| Cray MPICH network warning during `module reset`, then imports succeed | Step 3 passed; validate the GPU with the Step 4 smoke job. See the Step 3 explanation above |
 | `module load` fails | Inspect `module spider pytorch-conda`; keep setup and batch script versions identical |
 | No module named sklearn/torchvision/etc. | Run the import check and use the overlay venv; don't mix unrelated conda environments |
 | `CUDA unavailable` | Check allocation and node: login nodes have no GPU; CPU-only PyTorch also causes this |
@@ -275,6 +371,7 @@ Mac reminders: Control-C interrupts a foreground command; Command-T opens anothe
 - [CIFAR source and technical report](https://www.cs.toronto.edu/~kriz/cifar.html)
 - [Delta login and password/Duo prompts](https://docs.ncsa.illinois.edu/systems/delta/en/latest/user_guide/login.html)
 - [Delta software and PyTorch modules](https://docs.ncsa.illinois.edu/systems/delta/en/latest/user_guide/software.html)
+- [Delta Cray programming environment and MPI](https://docs.ncsa.illinois.edu/systems/delta/en/latest/user_guide/prog_env.html)
 - [Delta running jobs and partition limits](https://docs.ncsa.illinois.edu/systems/delta/en/latest/user_guide/running_jobs.html)
 - [Delta storage and project directories](https://docs.ncsa.illinois.edu/systems/delta/en/latest/user_guide/data_mgmt.html)
 - [scikit-learn logistic regression objective](https://scikit-learn.org/stable/modules/linear_model.html#logistic-regression)

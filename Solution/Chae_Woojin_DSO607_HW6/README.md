@@ -1,6 +1,21 @@
 # HW6: CIFAR cat/dog classification on Delta
 
-This is an experiment implementation and notebook scaffold. It contains no invented empirical results and is not a completed homework submission. The script and guide were prepared with generative AI; consult the syllabus for the required disclosure. No Delta connection or job submission has been made for you.
+This is an experiment implementation and notebook scaffold. It contains no invented empirical results and is not a completed homework submission. The script and guide were prepared with generative AI; consult the syllabus for the required disclosure. You confirmed that SSH login now works. No GPU job has been submitted by this assistant.
+
+## Your laptop and project
+
+Verified on your laptop: **Apple Silicon (arm64), macOS 26.6.2, zsh**. macOS already provides `/usr/bin/ssh` and `/usr/bin/scp`; use Terminal for the commands below. Your course environment uses Python 3.9.6 at `/Users/wchae/Courseworks/26 Fall/DSO607/.venv/bin/python`.
+
+| Setting | Your value |
+| --- | --- |
+| Local project | `/Users/wchae/Courseworks/26 Fall/DSO607/Solution/Chae_Woojin_DSO607_HW6` |
+| Notebook | `Chae_Woojin_DSO607_HW6.ipynb` |
+| NCSA username | `wchae` |
+| Delta login | `login.delta.ncsa.illinois.edu` |
+| GPU charge account | `YOUR_PROJECT-gpu` (find with `accounts` on Delta) |
+| Delta storage project | `LOCAL_PROJECT` (verify the actual `/work/hdd` directory) |
+
+Every Mac path containing `26 Fall` is quoted. Copy the commands without terminal prompt symbols. **Mac Terminal** means a local shell; **Delta Terminal** means the shell after SSH login. `module`, `accounts`, `sbatch`, and `squeue` belong in Delta Terminal. If unsure where you are, run `hostname`: your Mac and the Delta login node have different names. Use a second Terminal tab (Command-T) for local transfers while keeping the Delta session open.
 
 ## What runs where
 
@@ -26,13 +41,14 @@ These instructions target **NCSA Delta**, not DeltaAI (a separate system with di
 
 ## 1. Log in and identify your allocation (Mac Terminal)
 
-Replace `YOUR_USERNAME` with your NCSA username:
+You have resolved the login issue. Use your working NCSA credentials:
 
 ```bash
-ssh YOUR_USERNAME@login.delta.ncsa.illinois.edu
+ssh -o PreferredAuthentications=keyboard-interactive,password \
+  wchae@login.delta.ncsa.illinois.edu
 ```
 
-Enter the NCSA password and complete Duo. Password typing is invisible. Never put credentials in these scripts or share them in chat. If login fails, confirm your NCSA account, Duo enrollment, and active allocation through the NCSA portal/support.
+Enter your NCSA password, then complete the NCSA Duo prompt (for a listed push option, enter `1` and approve it). Password typing is invisible. A `Permission denied, please try again` at the password prompt happens before Duo; verify the NCSA password through [NCSA account management](https://identity.ncsa.illinois.edu/). The [official Delta login guide](https://docs.ncsa.illinois.edu/systems/delta/en/latest/user_guide/login.html) documents the keyboard-interactive option above. Never save passwords or Duo codes in the project.
 
 **On Delta**, run:
 
@@ -45,22 +61,27 @@ From `accounts`, note (a) the GPU charge account under Project, usually ending i
 
 ```bash
 ls /work/hdd
-mkdir -p /work/hdd/LOCAL_PROJECT/$USER/hw6_cifar_delta
+mkdir -p /work/hdd/LOCAL_PROJECT/$USER/Chae_Woojin_DSO607_HW6
 ```
 
-## 2. Transfer the files (a second terminal on your Mac)
+## 2. Transfer the files (a second Mac Terminal tab)
+
+First create the remote directory using Step 1. Then run this **on your Mac**, replacing `LOCAL_PROJECT` in the destination with the storage project you found on Delta:
 
 ```bash
-scp -r /Users/wchae/Documents/Codex/2026-11-20/hi/outputs/hw6_cifar_delta/. \
-  YOUR_USERNAME@login.delta.ncsa.illinois.edu:/work/hdd/LOCAL_PROJECT/YOUR_USERNAME/hw6_cifar_delta/
+cd "/Users/wchae/Courseworks/26 Fall/DSO607/Solution/Chae_Woojin_DSO607_HW6"
+scp -o PreferredAuthentications=keyboard-interactive,password \
+  README.md experiment.py config.json check_environment.py run_delta.slurm \
+  requirements-extra.txt Chae_Woojin_DSO607_HW6.ipynb \
+  wchae@login.delta.ncsa.illinois.edu:/work/hdd/LOCAL_PROJECT/wchae/Chae_Woojin_DSO607_HW6/
 ```
 
-Use the actual username in both places. Complete Duo again if requested.
+This transfers the seven project files without uploading local environments or downloaded results. Complete NCSA password/Duo authentication again if prompted. If `No such file or directory` refers to a source file, confirm `pwd` shows your local homework folder. If it refers to the destination, create or correct the remote directory in Step 1.
 
-## 3. Check the software (Delta login node)
+## 3. Check the software (return to your Delta Terminal tab)
 
 ```bash
-cd /work/hdd/LOCAL_PROJECT/$USER/hw6_cifar_delta
+cd /work/hdd/LOCAL_PROJECT/$USER/Chae_Woojin_DSO607_HW6
 module reset
 module load pytorch-conda/2.8
 export PYTHONNOUSERSITE=1
@@ -78,9 +99,9 @@ python3 -m venv --system-site-packages .venv
 .venv/bin/python check_environment.py
 ```
 
-Use `.venv/bin/python` instead of `python3` in subsequent manual commands if you created this environment. The batch script detects it automatically. Do not copy a Mac virtual environment to Delta; Linux requires different binaries. No CUDA toolkit installation is needed with the site PyTorch module. Record actual loaded versions; the requirements file supplements the site stack rather than fully locking it.
+If you created this overlay, run `source .venv/bin/activate` before subsequent manual Python commands in this Delta session; then `python3` uses the overlay. The batch script detects `.venv/bin/python` automatically. In a new login session, return to the remote project, load the same PyTorch module, and activate the overlay again. Do not copy a Mac virtual environment to Delta; Linux requires different binaries. No CUDA toolkit installation is needed with the site PyTorch module. Record actual loaded versions; the requirements file supplements the site stack rather than fully locking it.
 
-## 4. Run a short GPU integration test
+## 4. Run a short GPU integration test (Delta Terminal)
 
 Create a tiny config with R=2 and EPOCHS=2, and synthetic images (no homework scores):
 
@@ -117,7 +138,7 @@ sacct -j JOBID --format=JobID,JobName,State,Elapsed,ExitCode,MaxRSS
 
 Success includes the GPU matrix test, all four methods for both repetitions, `All repetitions finished`, and COMPLETED / exit 0. Synthetic smoke performance has no substantive meaning. `finalize` is unnecessary for this test.
 
-## 5. Prepare CIFAR and pilot runtime using development data only
+## 5. Prepare CIFAR and pilot runtime using development data only (Delta Terminal)
 
 Download and split without holding an idle GPU:
 
@@ -139,7 +160,7 @@ If the data URL fails on Delta, run preparation on another machine with the same
 
 Before the final run, make any development-informed choices to EPOCHS or candidate grids. Then freeze them for all 100 repetitions. If Lasso reaches its iteration limit, increase its budget or tolerance on development data, document the change, and create a fresh run. Code or config edits after prepare are intentionally rejected.
 
-## 6. Run the real experiment
+## 6. Run the real experiment (Delta Terminal)
 
 ```bash
 python3 experiment.py prepare --config config.json --data data --run runs/full
@@ -150,7 +171,7 @@ sbatch --account=YOUR_PROJECT-gpu run_delta.slurm runs/full
 
 If a wall-time limit interrupts a job, wait until it has ended, then submit the SAME command. Fully finished repetitions are skipped; an interrupted repetition is rerun from the start with the same seed. A partial repetition never counts as complete. Exceptions append to `failures.log` and terminate the job; no failed repetitions are silently omitted. Preserve that log and explain any resolutions. A new scientific configuration requires a new run, not deletion of inconvenient results.
 
-## 7. Finalize once, then open results
+## 7. Finalize once, then open results (Delta Terminal)
 
 Only after all 100 repetitions have finished and settings are irrevocably settled:
 
@@ -179,19 +200,51 @@ Every error is a proportion, not a percentage. The summary includes a fifth majo
 
 ## 8. Retrieve results and complete the notebook
 
-From your Mac, copy the entire project to a new destination (to avoid overwriting local originals):
+Run the following in **Mac Terminal** after finalization. Replace `LOCAL_PROJECT` in each remote path. Each download gets a timestamped folder under your homework project, preserving previous downloads:
 
 ```bash
-mkdir -p /Users/wchae/Documents/Codex/2026-11-20/hi/outputs/delta_download
-scp -r YOUR_USERNAME@login.delta.ncsa.illinois.edu:/work/hdd/LOCAL_PROJECT/YOUR_USERNAME/hw6_cifar_delta \
-  /Users/wchae/Documents/Codex/2026-11-20/hi/outputs/delta_download/
+cd "/Users/wchae/Courseworks/26 Fall/DSO607/Solution/Chae_Woojin_DSO607_HW6"
+DOWNLOAD_DIR="$PWD/delta_download/$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$DOWNLOAD_DIR/runs"
+scp -o PreferredAuthentications=keyboard-interactive,password -r \
+  wchae@login.delta.ncsa.illinois.edu:/work/hdd/LOCAL_PROJECT/wchae/Chae_Woojin_DSO607_HW6/runs/full \
+  "$DOWNLOAD_DIR/runs/"
+scp -o PreferredAuthentications=keyboard-interactive,password -r \
+  wchae@login.delta.ncsa.illinois.edu:/work/hdd/LOCAL_PROJECT/wchae/Chae_Woojin_DSO607_HW6/logs \
+  "$DOWNLOAD_DIR/"
+scp -o PreferredAuthentications=keyboard-interactive,password \
+  'wchae@login.delta.ncsa.illinois.edu:/work/hdd/LOCAL_PROJECT/wchae/Chae_Woojin_DSO607_HW6/*.py' \
+  'wchae@login.delta.ncsa.illinois.edu:/work/hdd/LOCAL_PROJECT/wchae/Chae_Woojin_DSO607_HW6/*.json' \
+  'wchae@login.delta.ncsa.illinois.edu:/work/hdd/LOCAL_PROJECT/wchae/Chae_Woojin_DSO607_HW6/*.ipynb' \
+  'wchae@login.delta.ncsa.illinois.edu:/work/hdd/LOCAL_PROJECT/wchae/Chae_Woojin_DSO607_HW6/README.md' \
+  'wchae@login.delta.ncsa.illinois.edu:/work/hdd/LOCAL_PROJECT/wchae/Chae_Woojin_DSO607_HW6/requirements-extra.txt' \
+  'wchae@login.delta.ncsa.illinois.edu:/work/hdd/LOCAL_PROJECT/wchae/Chae_Woojin_DSO607_HW6/run_delta.slurm' \
+  "$DOWNLOAD_DIR/"
+open "$DOWNLOAD_DIR"
 ```
+
+The quotes around remote wildcards prevent your Mac's zsh from expanding them locally. The transferred `experiment.py` must match the embedded notebook implementation and frozen source hash. This downloads results/models and logs without copying Delta's Linux virtual environment or the CIFAR download cache. Keep this Mac Terminal tab open if you want to reuse `$DOWNLOAD_DIR` in the next commands; shell variables belong to their current tab.
+
+### Open the notebook locally on your Apple Silicon Mac (optional)
+
+You can inspect CSVs and PNGs immediately in Finder. To run the notebook's display-only mode, create a separate local environment using your existing course Python:
+
+```bash
+cd "/Users/wchae/Courseworks/26 Fall/DSO607/Solution/Chae_Woojin_DSO607_HW6"
+"/Users/wchae/Courseworks/26 Fall/DSO607/.venv/bin/python" -m venv .venv_mac
+.venv_mac/bin/python -m pip install --upgrade pip
+.venv_mac/bin/python -m pip install 'torch==2.8.0' 'torchvision==0.23.0' \
+  -r requirements-extra.txt 'notebook>=7,<8'
+.venv_mac/bin/python -m notebook --notebook-dir="$DOWNLOAD_DIR"
+```
+
+These commands install macOS packages into `.venv_mac`, leaving your course environment available for other homework. They do not install an NVIDIA CUDA toolkit on your Mac. Open `Chae_Woojin_DSO607_HW6.ipynb` from that downloaded folder, with `RUN_EXPERIMENT=False` and `FINALIZE=False`. Its relative `runs/full` path then finds the downloaded results. The notebook server stays in the foreground; stop it with Control-C when finished. Do not enable `DEVICE="cuda"` training locally: this project's CUDA path targets Delta's NVIDIA GPU. Local CPU training is possible with `DEVICE="cpu"`, but the full 100-repetition experiment is intended for Delta.
 
 Back up run artifacts; shared work/project storage is not archival backup. Keep all prepared data, indices, configs, logs, predictions, and selected models. The notebook lives beside `experiment.py` and defaults to `runs/full`. It includes the full implementation as an embedded code cell, not just a shell call. Its default mode displays previously finalized results without retraining or opening sealed labels. It displays the tables (including all 400 rows), both figures, settings, epochs, and environments. Fill in the interpretation cells based on actual results.
 
 For a full rebuild, use the notebook inside a Delta GPU notebook allocation, set `RUN_EXPERIMENT=True`, `FINALIZE=True`, and choose a fresh RUN_DIR. Top-level R and EPOCHS control its embedded config. A restart-and-run reuses a prepared frozen run and skips completed repetitions. A finalized run is display-only unless you choose a new directory. The notebook does not need a GPU to display exported results; it does need the imported scientific packages, including torch, installed locally. To use the Delta site notebook environment, follow the official Open OnDemand Jupyter guidance linked from the software page below; request a GPU allocation for rebuilding.
 
-Submission requires exactly a LaTeX-produced PDF and a notebook named with your actual first/last names. This bundle intentionally does not generate empirical interpretations or a submission PDF before results exist. Restart and run all cells, save visible outputs, and add the syllabus-compliant AI disclosure at the end of BOTH submitted files. The exact disclosure wording cannot be established from the homework alone.
+Your submission filenames are `Chae_Woojin_DSO607_HW6.pdf` and `Chae_Woojin_DSO607_HW6.ipynb`; produce the PDF using LaTeX. This bundle intentionally does not generate empirical interpretations or a submission PDF before results exist. Restart and run all cells, save visible outputs, and add the syllabus-compliant AI disclosure at the end of BOTH submitted files. The exact disclosure wording cannot be established from the homework alone.
 
 ## Interpretation prompts
 
@@ -201,8 +254,13 @@ Two potential future improvements: training-only random flips/crops for the CNN,
 
 ## Common problems
 
+Mac reminders: Control-C interrupts a foreground command; Command-T opens another local Terminal tab. Once `sbatch` accepts a job, the scheduler runs it independently of your laptop. You can disconnect with `exit` or close the SSH tab; check it later with `squeue`/`sacct`. Training through a direct interactive `srun` session has different session-lifetime behavior. Your Mac can sleep during a submitted batch job; reconnect afterward to monitor it.
+
 | Symptom | Next step |
 | --- | --- |
+| `Permission denied` before Duo | Verify your NCSA username/password, then retry the SSH command in Step 1 |
+| `zsh: command not found: sbatch` or `module` | You are probably in Mac Terminal; SSH into Delta first |
+| `zsh: no matches found` during scp | Quote the remote path containing `*`, as in Step 8 |
 | Invalid account/account-partition combination | Use `accounts` and select the correct GPU charge account; account access may need PI/admin help |
 | `module load` fails | Inspect `module spider pytorch-conda`; keep setup and batch script versions identical |
 | No module named sklearn/torchvision/etc. | Run the import check and use the overlay venv; don't mix unrelated conda environments |
@@ -215,6 +273,7 @@ Two potential future improvements: training-only random flips/crops for the CNN,
 ## Sources checked November 20, 2026
 
 - [CIFAR source and technical report](https://www.cs.toronto.edu/~kriz/cifar.html)
+- [Delta login and password/Duo prompts](https://docs.ncsa.illinois.edu/systems/delta/en/latest/user_guide/login.html)
 - [Delta software and PyTorch modules](https://docs.ncsa.illinois.edu/systems/delta/en/latest/user_guide/software.html)
 - [Delta running jobs and partition limits](https://docs.ncsa.illinois.edu/systems/delta/en/latest/user_guide/running_jobs.html)
 - [Delta storage and project directories](https://docs.ncsa.illinois.edu/systems/delta/en/latest/user_guide/data_mgmt.html)

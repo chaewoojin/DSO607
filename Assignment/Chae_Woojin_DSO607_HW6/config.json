@@ -1,0 +1,19 @@
+{
+  "R": 100,
+  "EPOCHS": 20,
+  "patience": 4,
+  "split_seed": 6072026,
+  "development_seed_base": 160700,
+  "model_seed_base": 260700,
+  "image_size": 16,
+  "batch_size": 128,
+  "learning_rate": 0.001,
+  "lasso_tol": 0.001,
+  "lasso_max_iter": 5000,
+  "candidates": {
+    "Lasso": [{"C": 0.01}, {"C": 0.1}],
+    "KNN": [{"n_neighbors": 5}, {"n_neighbors": 15}],
+    "RF": [{"max_depth": 10}, {"max_depth": null}],
+    "DNN": [{"weight_decay": 0.0001}, {"weight_decay": 0.001}]
+  }
+}

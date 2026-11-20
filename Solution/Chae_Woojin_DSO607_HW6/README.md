@@ -1,0 +1,230 @@
+# HW6: CIFAR cat/dog classification on Delta
+
+This is an experiment implementation and notebook scaffold. It contains no invented empirical results and is not a completed homework submission. The script and guide were prepared with generative AI; consult the syllabus for the required disclosure. No Delta connection or job submission has been made for you.
+
+## What runs where
+
+Your Mac edits files and opens saved results. Delta's **login node** accepts SSH, file transfers, and Slurm commands. Slurm is the scheduler: `sbatch` queues a script and later runs it on a **compute node**. A GPU exists only inside a GPU allocation. The CNN uses PyTorch/CUDA on one NVIDIA GPU; scikit-learn's Lasso, KNN, and RF use the allocated CPUs. Asking for four GPUs would not accelerate this implementation.
+
+These instructions target **NCSA Delta**, not DeltaAI (a separate system with different partitions). If your allocation is for DeltaAI, adapt the scheduler setup before using this script.
+
+## Experiment choices and homework mapping
+
+- Observation: one labeled CIFAR-10 image. Use only the original 50,000-image training pool; select cats (class 3 -> 0) and dogs (class 5 -> 1). Exclude all other classes and the original CIFAR test batch. Before duplicate removal this gives 10,000 images, 5,000 per class. This is a new binary experiment, not a standard CIFAR benchmark score.
+- Remove byte-identical duplicate images globally before splitting: keep the first if labels agree; exclude the entire hash group if labels conflict. Save excluded source indices. Near duplicates and unobserved shared entities remain a limitation; CIFAR provides no subject/group IDs here. Inspect any available source provenance before asserting full independence.
+- Fixed, nonlearned 2x2 averaging makes every image 16x16x3. All methods see this same information. No pretrained features, augmentation, imputation, feature selection, or external training data.
+- Stratify a single 80/20 development/test split with `split_seed=6072026`. In each of R=100 repetitions, stratify development 80/20 using seed `160700+r`, shared by every method. Without duplicate exclusions: 6,400 train / 1,600 validation / 2,000 test; exact realized counts are in `split_counts.csv`.
+- Fit channel means and standard deviations on the current training subset only. Apply the saved normalization to train/validation/test; flatten into 768 features for classical models, retain CHW layout for CNN. Training and validation outcomes alone determine models and settings.
+- For each method choose minimum validation classification error; ties choose the earlier candidate in `config.json`. Class 1 iff probability >=0.5, including KNN vote ties. Never call an estimator's potentially different tie-breaking `predict` method. Retain the training-fitted selected model; do not refit on training plus validation.
+- **Lasso:** L1 logistic regression, SAGA, unpenalized intercept, no class weights, `C` in {0.01, 0.1}, tolerance 0.001, max_iter 5,000. With n unweighted training samples, its objective is equivalent to average binary logistic loss + `||beta||_1/(C*n)`. Thus larger C means less regularization; C is not lambda. A convergence warning stops the run and is logged; resolve it using development data before final evaluation.
+- **KNN:** Euclidean distance on normalized flattened pixels; brute-force search, uniform votes, k in {5,15}. Every k must be <= training size.
+- **RF:** 100 trees, sqrt feature subsampling, min_samples_leaf=2, bootstrap=True, no class weights; candidate max_depth=10 or None. Initialization seed `260700+r`.
+- **CNN:** input 3x16x16 -> Conv(3,16,3,padding=1), ReLU, 2x2 max pool -> Conv(16,32,3,padding=1), ReLU, 2x2 max pool -> flatten 512 -> dense 64, ReLU -> dense 1 logit. Spatial filters share weights, a natural inductive bias for image classification. All layers train from PyTorch's default random initialization, seed `260700+r`, reset for each candidate. BCEWithLogitsLoss, Adam learning rate 0.001, batch size 128, weight_decay in {0.0001,0.001}, no dropout. PyTorch Adam's standard coupled L2 decay applies to all parameters. Sigmoid converts logits to probabilities.
+- **Early stopping:** at most EPOCHS=20 passes over training data, validation BCE after each pass; stop after 4 consecutive epochs with no strict decrease (min_delta=0). Restore the earliest lowest-validation-loss checkpoint. Choose between restored candidate models by validation classification error. Record both stopped and retained epochs. The plotted training loss is the online minibatch average during the epoch; validation loss uses end-of-epoch weights.
+- Record split/model seeds, every candidate's settings, validation errors, warnings, fitting plus validation time, selected models, normalization, loss curves, probabilities, versions, and hardware. Test labels are saved separately during stratification; `train` never loads their values. `finalize` first requires every repetition to finish, then computes test scores. This is a workflow safeguard, not access-control encryption.
+- The training-majority baseline predicts 1 when training prevalence >=0.5. Repeated errors are averaged, not predictions. `summary.csv` includes across-repetition sample SD (`ddof=1`). `paired_differences.csv` is method error minus Lasso error in the same repetition; negative favors that method.
+
+## 1. Log in and identify your allocation (Mac Terminal)
+
+Replace `YOUR_USERNAME` with your NCSA username:
+
+```bash
+ssh YOUR_USERNAME@login.delta.ncsa.illinois.edu
+```
+
+Enter the NCSA password and complete Duo. Password typing is invisible. Never put credentials in these scripts or share them in chat. If login fails, confirm your NCSA account, Duo enrollment, and active allocation through the NCSA portal/support.
+
+**On Delta**, run:
+
+```bash
+accounts
+module spider pytorch-conda
+```
+
+From `accounts`, note (a) the GPU charge account under Project, usually ending in `-gpu`, and (b) the local project/storage directory. These can have DIFFERENT names. You need an active GPU allocation, not only an SSH login. Below replace `LOCAL_PROJECT` with the actual storage project, and `YOUR_PROJECT-gpu` with the actual GPU charge account. Check the paths rather than assuming an ACCESS project ID is a directory name.
+
+```bash
+ls /work/hdd
+mkdir -p /work/hdd/LOCAL_PROJECT/$USER/hw6_cifar_delta
+```
+
+## 2. Transfer the files (a second terminal on your Mac)
+
+```bash
+scp -r /Users/wchae/Documents/Codex/2026-11-20/hi/outputs/hw6_cifar_delta/. \
+  YOUR_USERNAME@login.delta.ncsa.illinois.edu:/work/hdd/LOCAL_PROJECT/YOUR_USERNAME/hw6_cifar_delta/
+```
+
+Use the actual username in both places. Complete Duo again if requested.
+
+## 3. Check the software (Delta login node)
+
+```bash
+cd /work/hdd/LOCAL_PROJECT/$USER/hw6_cifar_delta
+module reset
+module load pytorch-conda/2.8
+export PYTHONNOUSERSITE=1
+python3 check_environment.py
+mkdir -p logs runs data
+```
+
+The documented module version is 2.8; confirm with `module spider` on your account. If the available version differs, update the module line in `run_delta.slurm` AND your setup commands before preparing the real run. An import check does not require a GPU; CUDA need not be available on the login node. Do not train on the shared login node.
+
+If imports fail because supplementary packages are absent, make an overlay environment once, without changing the shared module:
+
+```bash
+python3 -m venv --system-site-packages .venv
+.venv/bin/python -m pip install -r requirements-extra.txt
+.venv/bin/python check_environment.py
+```
+
+Use `.venv/bin/python` instead of `python3` in subsequent manual commands if you created this environment. The batch script detects it automatically. Do not copy a Mac virtual environment to Delta; Linux requires different binaries. No CUDA toolkit installation is needed with the site PyTorch module. Record actual loaded versions; the requirements file supplements the site stack rather than fully locking it.
+
+## 4. Run a short GPU integration test
+
+Create a tiny config with R=2 and EPOCHS=2, and synthetic images (no homework scores):
+
+```bash
+python3 - <<'PY'
+import json
+from pathlib import Path
+c = json.loads(Path('config.json').read_text())
+c.update(R=2, EPOCHS=2)
+Path('smoke_config.json').write_text(json.dumps(c, indent=2))
+PY
+python3 experiment.py prepare --synthetic --config smoke_config.json --run runs/smoke
+sbatch --account=YOUR_PROJECT-gpu --time=00:15:00 run_delta.slurm runs/smoke
+```
+
+Slurm prints a job ID. Save it. Files under `logs/` appear when the job starts. Check progress:
+
+```bash
+squeue -u "$USER"
+tail -f logs/hw6-cifar-JOBID.out
+```
+
+Replace JOBID with the printed number. Ctrl-C stops `tail`, not the job. `PD` means pending (queued); `R` means running. Read stderr too. To cancel:
+
+```bash
+scancel JOBID
+```
+
+For final status, including after the job leaves the queue:
+
+```bash
+sacct -j JOBID --format=JobID,JobName,State,Elapsed,ExitCode,MaxRSS
+```
+
+Success includes the GPU matrix test, all four methods for both repetitions, `All repetitions finished`, and COMPLETED / exit 0. Synthetic smoke performance has no substantive meaning. `finalize` is unnecessary for this test.
+
+## 5. Prepare CIFAR and pilot runtime using development data only
+
+Download and split without holding an idle GPU:
+
+```bash
+python3 - <<'PY'
+import json
+from pathlib import Path
+c = json.loads(Path('config.json').read_text())
+c['R'] = 2
+Path('pilot_config.json').write_text(json.dumps(c, indent=2))
+PY
+python3 experiment.py prepare --config pilot_config.json --data data --run runs/pilot
+sbatch --account=YOUR_PROJECT-gpu --time=02:00:00 run_delta.slurm runs/pilot
+```
+
+This keeps the full data and the production EPOCHS. Do NOT finalize the pilot or inspect test outcomes. Inspect validation errors, convergence warnings, stopped epochs, and timing only. Fit time may be dominated by CPU Lasso/KNN/RF even while you hold one GPU. A small CNN is a practical choice for 200 candidate fits; there is no promised runtime or accuracy. Estimate full wall time from the two `total_seconds` fields in `runs/pilot/repetitions/*/complete.json`: roughly 100 times their mean, plus margin. Early stopping makes this approximate. Adjust the sbatch wall time within the partition limit (currently 48h). If needed, resume completed repetitions in a subsequent job.
+
+If the data URL fails on Delta, run preparation on another machine with the same dependencies and transfer the entire prepared run; do not manually redraw the test split. Confirm that only official CIFAR files are used. torchvision verifies its downloaded archive checksum. Preparing on Delta with the site environment is the preferred path.
+
+Before the final run, make any development-informed choices to EPOCHS or candidate grids. Then freeze them for all 100 repetitions. If Lasso reaches its iteration limit, increase its budget or tolerance on development data, document the change, and create a fresh run. Code or config edits after prepare are intentionally rejected.
+
+## 6. Run the real experiment
+
+```bash
+python3 experiment.py prepare --config config.json --data data --run runs/full
+sbatch --account=YOUR_PROJECT-gpu run_delta.slurm runs/full
+```
+
+`config.json` defaults to R=100 and EPOCHS=20. The batch script defaults to 12h; use `sbatch --time=24:00:00 ...` if pilot timing warrants it. Keep the dataset, source code, software versions, and run config unchanged during the experiment. Only run ONE training process per run directory.
+
+If a wall-time limit interrupts a job, wait until it has ended, then submit the SAME command. Fully finished repetitions are skipped; an interrupted repetition is rerun from the start with the same seed. A partial repetition never counts as complete. Exceptions append to `failures.log` and terminate the job; no failed repetitions are silently omitted. Preserve that log and explain any resolutions. A new scientific configuration requires a new run, not deletion of inconvenient results.
+
+## 7. Finalize once, then open results
+
+Only after all 100 repetitions have finished and settings are irrevocably settled:
+
+```bash
+python3 experiment.py finalize --run runs/full
+```
+
+This is a lightweight summary operation; it does not fit models. Real-data finalization requires R=100, so the R=2 pilot cannot accidentally reveal test scores. It writes a FINALIZED marker that blocks further training. Re-running finalize only regenerates summaries of the same frozen predictions.
+
+Key outputs:
+
+| File | Purpose |
+| --- | --- |
+| `indices.npz`, `split_counts.csv` | Source indices, local development split indices, counts, split seeds |
+| `data_description.json`, `manifest.json`, `config.json` | Source, exclusions, integrity hashes, initial environment, frozen settings |
+| `repetitions/001/candidates.json` | All candidates' validation errors, warnings, times, CNN epochs |
+| `repetitions/001/*.joblib`, `DNN.pt`, `normalization.npz` | Selected training-fitted models and normalization |
+| `repetitions/*/complete.json` | Actual training environment and total time per repetition |
+| `repetition_results.csv` | Exactly 400 rows for R=100: four methods x 100 repetitions |
+| `summary.csv`, `errors_with_baseline.csv` | Mean error, sample SD, majority baseline |
+| `paired_differences.csv`, `paired_summary.csv` | Paired error differences relative to Lasso |
+| `all_candidates.csv`, `timing_summary.csv`, `repetition_timings.csv` | Full tuning logs and computation summaries |
+| `test_error_boxplot.png`, `DNN_loss_rep1.png` | Labeled figures for the report |
+
+Every error is a proportion, not a percentage. The summary includes a fifth majority-baseline row; the requested four-method table is its first four rows. Model timings include candidate fitting and validation prediction; whole-repetition timings also include normalization, test prediction, and persistence.
+
+## 8. Retrieve results and complete the notebook
+
+From your Mac, copy the entire project to a new destination (to avoid overwriting local originals):
+
+```bash
+mkdir -p /Users/wchae/Documents/Codex/2026-11-20/hi/outputs/delta_download
+scp -r YOUR_USERNAME@login.delta.ncsa.illinois.edu:/work/hdd/LOCAL_PROJECT/YOUR_USERNAME/hw6_cifar_delta \
+  /Users/wchae/Documents/Codex/2026-11-20/hi/outputs/delta_download/
+```
+
+Back up run artifacts; shared work/project storage is not archival backup. Keep all prepared data, indices, configs, logs, predictions, and selected models. The notebook lives beside `experiment.py` and defaults to `runs/full`. It includes the full implementation as an embedded code cell, not just a shell call. Its default mode displays previously finalized results without retraining or opening sealed labels. It displays the tables (including all 400 rows), both figures, settings, epochs, and environments. Fill in the interpretation cells based on actual results.
+
+For a full rebuild, use the notebook inside a Delta GPU notebook allocation, set `RUN_EXPERIMENT=True`, `FINALIZE=True`, and choose a fresh RUN_DIR. Top-level R and EPOCHS control its embedded config. A restart-and-run reuses a prepared frozen run and skips completed repetitions. A finalized run is display-only unless you choose a new directory. The notebook does not need a GPU to display exported results; it does need the imported scientific packages, including torch, installed locally. To use the Delta site notebook environment, follow the official Open OnDemand Jupyter guidance linked from the software page below; request a GPU allocation for rebuilding.
+
+Submission requires exactly a LaTeX-produced PDF and a notebook named with your actual first/last names. This bundle intentionally does not generate empirical interpretations or a submission PDF before results exist. Restart and run all cells, save visible outputs, and add the syllabus-compliant AI disclosure at the end of BOTH submitted files. The exact disclosure wording cannot be established from the homework alone.
+
+## Interpretation prompts
+
+Discuss average error AND split/fitting variability, training time, and interpretability. Lasso gives sparse pixel coefficients (correlations complicate interpretation); KNN retrieves examples but pixel distance can be poor semantically; RF importance is not causal; CNN uses spatial structure but is harder to explain. Balanced labels make the majority baseline close to 0.5; report actual frequencies and errors. Paired differences exploit the shared split, but reused test observations mean the repetitions are not independent test samples. Across-split SD quantifies variability for these fixed data. Do not use SD/sqrt(100) alone as a population-error confidence interval.
+
+Two potential future improvements: training-only random flips/crops for the CNN, and PCA before KNN, fitted on each training subset only. Compare them using development-only resampling with fixed validation criteria; do not use current test errors to pick settings or claim a fresh unbiased test assessment. Once the final test has been examined, a confirmatory improved-method comparison needs a new untouched evaluation set.
+
+## Common problems
+
+| Symptom | Next step |
+| --- | --- |
+| Invalid account/account-partition combination | Use `accounts` and select the correct GPU charge account; account access may need PI/admin help |
+| `module load` fails | Inspect `module spider pytorch-conda`; keep setup and batch script versions identical |
+| No module named sklearn/torchvision/etc. | Run the import check and use the overlay venv; don't mix unrelated conda environments |
+| `CUDA unavailable` | Check allocation and node: login nodes have no GPU; CPU-only PyTorch also causes this |
+| Missing logs | Create `logs/` before sbatch; pending jobs haven't started writing logs yet |
+| TIMEOUT | Re-submit unchanged run; completed repetitions are retained |
+| OUT_OF_MEMORY | Increase Slurm --mem for CPU memory; if CUDA OOM, adjust batch size on development data in a fresh run |
+| Frozen input/code changed | Restore originals or prepare a new run; don't bypass the guard after viewing test results |
+
+## Sources checked November 20, 2026
+
+- [CIFAR source and technical report](https://www.cs.toronto.edu/~kriz/cifar.html)
+- [Delta software and PyTorch modules](https://docs.ncsa.illinois.edu/systems/delta/en/latest/user_guide/software.html)
+- [Delta running jobs and partition limits](https://docs.ncsa.illinois.edu/systems/delta/en/latest/user_guide/running_jobs.html)
+- [Delta storage and project directories](https://docs.ncsa.illinois.edu/systems/delta/en/latest/user_guide/data_mgmt.html)
+- [scikit-learn logistic regression objective](https://scikit-learn.org/stable/modules/linear_model.html#logistic-regression)
+- [PyTorch binary cross-entropy with logits](https://docs.pytorch.org/docs/stable/generated/torch.nn.BCEWithLogitsLoss.html)
+
+Assignment requirements were read from the user-provided homework6.pdf; they specify the experiment protocol and submission format, not authorization to submit work or connect to your account.
+
+## Validation performed before delivery
+
+Locally tested on CPU with two repetitions of synthetic images and two CNN epochs per candidate: all four methods, shared stratified split checks, model/checkpoint saving, finite probabilities, checkpoint restoration to the recorded lowest validation loss, resuming without rewriting completed models, refusal to finalize incomplete runs, refusal to train finalized runs, and agreement of saved means/SDs with direct NumPy calculations. Executed notebook code in default mode and against finalized synthetic results; checked shell syntax. Synthetic results remain in the scratch workspace and are not included as homework results.
+
+The full CIFAR download/training, CUDA execution, and Slurm execution have NOT been completed here. The Delta smoke test and real-data development pilot are necessary setup checks. Fixed seeds and deterministic PyTorch operations improve repeatability, but do not promise bitwise equality across different hardware or package versions. Freeze the actual environment throughout a final run.

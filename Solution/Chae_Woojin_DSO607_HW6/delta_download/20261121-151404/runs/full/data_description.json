@@ -1,0 +1,25 @@
+{
+  "source": "https://www.cs.toronto.edu/~kriz/cifar.html",
+  "synthetic": false,
+  "source_pool": "CIFAR-10 official training batch only; original test batch excluded",
+  "label_map": {
+    "0": "cat (original label 3)",
+    "1": "dog (original label 5)"
+  },
+  "n": 10000,
+  "class_counts": {
+    "0": 5000,
+    "1": 5000
+  },
+  "development_counts": {
+    "0": 4000,
+    "1": 4000
+  },
+  "fixed_test_counts": {
+    "0": 1000,
+    "1": 1000
+  },
+  "excluded_source_ids": [],
+  "deduplication": "Keep first byte-identical image if labels agree; exclude conflicting groups",
+  "dependence_limit": "No entity IDs; exact duplicates removed, near duplicates not ruled out"
+}

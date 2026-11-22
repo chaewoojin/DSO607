@@ -1,0 +1,22 @@
+{
+  "repetition": 56,
+  "environment": {
+    "python": "3.11.13 | packaged by conda-forge | (main, Jun  4 2025, 14:48:23) [GCC 13.3.0]",
+    "platform": "Linux-5.14.0-570.154.1.el9_6.x86_64-x86_64-with-glibc2.34",
+    "packages": {
+      "numpy": "2.2.6",
+      "pandas": "2.3.2",
+      "scipy": "1.16.1",
+      "scikit-learn": "1.7.2",
+      "torch": "2.8.0+cu128",
+      "torchvision": "0.23.0+cu128",
+      "matplotlib": "3.10.6",
+      "joblib": "1.5.2"
+    },
+    "cuda": "12.8",
+    "gpu": "NVIDIA A100-SXM4-40GB",
+    "slurm_job_id": "24324166",
+    "cpus": "8"
+  },
+  "total_seconds": 18.82422577100806
+}

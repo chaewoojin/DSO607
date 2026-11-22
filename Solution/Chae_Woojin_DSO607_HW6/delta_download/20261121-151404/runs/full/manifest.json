@@ -1,0 +1,28 @@
+{
+  "files": {
+    "config.json": "e5fd87a0dd714bcbd282d5d590d4e80fb96b568eaa5ff6bfcea3e01e1c0bb7cb",
+    "development.npz": "469e921c922d8e0af0947acc2c56d09be73158726c0e44a849b56882dc68349c",
+    "test_x.npy": "94e32cc17730b3a6de53007fe55700f88ea5ab027ad4d0f78be115728da0fda9",
+    "SEALED_test_y.npy": "ff9050370f01a8b9ce57f5fcddcbb56a0762862621c2c95a5620935884467187",
+    "indices.npz": "a9805399258ef62f79d432ada8a6a0f16df599e7c200bf8d905ae95ada669686"
+  },
+  "code_sha256": "38a0f387abe65eb60a2ad933e7e4827a8f0497bfc0ee788821ba7aff481ad47c",
+  "environment": {
+    "python": "3.11.13 | packaged by conda-forge | (main, Jun  4 2025, 14:48:23) [GCC 13.3.0]",
+    "platform": "Linux-5.14.0-570.154.1.el9_6.x86_64-x86_64-with-glibc2.34",
+    "packages": {
+      "numpy": "2.2.6",
+      "pandas": "2.3.2",
+      "scipy": "1.16.1",
+      "scikit-learn": "1.7.2",
+      "torch": "2.8.0+cu128",
+      "torchvision": "0.23.0+cu128",
+      "matplotlib": "3.10.6",
+      "joblib": "1.5.2"
+    },
+    "cuda": "12.8",
+    "gpu": null,
+    "slurm_job_id": null,
+    "cpus": "128"
+  }
+}
